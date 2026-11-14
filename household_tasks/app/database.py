@@ -96,20 +96,19 @@ class Database:
         ).fetchall()
 
         today = date.today()
-        soon  = today + timedelta(days=3)
 
         for room in rooms:
             tasks = c.execute(
                 "SELECT due_date FROM tasks WHERE room_id = ?", (room["id"],)
             ).fetchall()
-            room["task_count"]     = len(tasks)
-            room["overdue_count"]  = sum(
+            room["task_count"]      = len(tasks)
+            room["overdue_count"]   = sum(
                 1 for t in tasks
                 if t["due_date"] and _parse_date(t["due_date"]) < today
             )
-            room["due_soon_count"] = sum(
+            room["due_today_count"] = sum(
                 1 for t in tasks
-                if t["due_date"] and today <= _parse_date(t["due_date"]) <= soon
+                if t["due_date"] and _parse_date(t["due_date"]) == today
             )
         conn.close()
         return rooms
@@ -301,8 +300,8 @@ class Database:
             VALUES (?, ?, ?, ?)
         """, (task_id, member_id, completed_at, data.get("notes") or None))
 
-        # Recalculate next due date for recurring tasks
         if task["is_recurring"] and task["recurrence_type"]:
+            # Recurring: recalculate next due date
             cfg  = json.loads(task["recurrence_config"]) if task["recurrence_config"] else {}
             from_date = datetime.fromisoformat(completed_at).date()
             next_due  = _calculate_next_due(task["recurrence_type"], cfg, from_date)
@@ -310,10 +309,15 @@ class Database:
                 "UPDATE tasks SET due_date = ? WHERE id = ?",
                 (next_due.isoformat() if next_due else None, task_id),
             )
-
-        conn.commit()
-        conn.close()
-        return self.get_task(task_id)
+            conn.commit()
+            conn.close()
+            return self.get_task(task_id)
+        else:
+            # Non-recurring: delete the task after logging completion
+            conn.commit()
+            conn.close()
+            self.delete_task(task_id)
+            return {"deleted": True, "id": task_id}
 
     def get_task_log(self, task_id):
         conn = self._conn()
@@ -330,29 +334,29 @@ class Database:
         return log
 
     def get_streak(self):
-        """Return the number of days since any task was last overdue.
+        """Return streak info dict.
 
-        Returns 0 if any task is currently past its due date.
-        Otherwise returns days elapsed since the most recent completion
-        that was logged after the task's due_date (i.e. a late completion).
-        Falls back to 0 if there have never been late completions and no
-        tasks are overdue (which shouldn't happen in practice, but we
-        return 0 as a safe default for new installs with no history).
+        {"streak": N, "has_history": bool}
+
+        streak = 0  → a task is currently overdue
+        streak = N  → days since last late completion
+        has_history = False → no late completions ever recorded (new install);
+                               the frontend shows a neutral "getting started" banner.
         """
         from datetime import date, datetime, timezone
         today = date.today().isoformat()
         conn = self._conn()
 
-        # If any task is currently overdue → streak is 0
+        # If any task is currently overdue → streak broken
         overdue = conn.execute(
             "SELECT 1 FROM tasks WHERE due_date IS NOT NULL AND due_date < ? LIMIT 1",
             (today,)
         ).fetchone()
         if overdue:
             conn.close()
-            return 0
+            return {"streak": 0, "has_history": True}
 
-        # Find the most recent late completion (completed_at > due_date)
+        # Find the most recent late completion (completed after its due_date)
         row = conn.execute("""
             SELECT l.completed_at
             FROM completion_log l
@@ -365,16 +369,14 @@ class Database:
         conn.close()
 
         if not row:
-            # No late completions on record — treat streak as starting from
-            # the beginning of time (return a large number capped at 999).
-            return 999
+            # No late completions ever — fresh install or perfectly on-time history
+            return {"streak": 0, "has_history": False}
 
-        late_ts = row["completed_at"]  # ISO string
-        # Strip timezone suffix for naive parsing if present
+        late_ts = row["completed_at"]
         late_dt = datetime.fromisoformat(late_ts.replace("Z", "+00:00"))
-        now_dt = datetime.now(timezone.utc)
-        days = int((now_dt - late_dt).total_seconds() // 86400)
-        return max(days, 0)
+        now_dt  = datetime.now(timezone.utc)
+        days    = int((now_dt - late_dt).total_seconds() // 86400)
+        return {"streak": max(days, 0), "has_history": True}
 
 
 # ── Recurrence calculation ─────────────────────────────────────────────────────

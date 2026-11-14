@@ -3,6 +3,9 @@
 
 import os
 import logging
+import threading
+import time
+import requests as _requests
 from flask import Flask, jsonify, request, render_template
 from database import Database
 
@@ -149,7 +152,56 @@ def get_task_log(task_id):
 
 @app.route("/api/streak", methods=["GET"])
 def get_streak():
-    return jsonify({"streak": db.get_streak()})
+    return jsonify(db.get_streak())
+
+
+# ── HA Notifications ───────────────────────────────────────────────────────────
+
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+HA_API = "http://supervisor/core/api"
+
+def _ha_notify(title: str, message: str):
+    """Send a persistent notification to Home Assistant."""
+    if not SUPERVISOR_TOKEN:
+        logger.warning("No SUPERVISOR_TOKEN — skipping notification")
+        return
+    try:
+        _requests.post(
+            f"{HA_API}/services/persistent_notification/create",
+            headers={"Authorization": f"Bearer {SUPERVISOR_TOKEN}"},
+            json={"title": title, "message": message, "notification_id": "household_tasks"},
+            timeout=5,
+        )
+    except Exception as exc:
+        logger.warning("HA notification failed: %s", exc)
+
+
+def _notification_loop():
+    """Background thread: check for overdue / due-today tasks every hour
+    and fire a HA notification if any are found."""
+    # Wait a bit after startup before the first check
+    time.sleep(60)
+    while True:
+        try:
+            from datetime import date
+            today = date.today().isoformat()
+            rooms = db.get_rooms()
+            overdue_total  = sum(r.get("overdue_count",  0) for r in rooms)
+            today_total    = sum(r.get("due_today_count", 0) for r in rooms)
+
+            if overdue_total > 0 or today_total > 0:
+                parts = []
+                if overdue_total:
+                    parts.append(f"{overdue_total} overdue task{'s' if overdue_total != 1 else ''}")
+                if today_total:
+                    parts.append(f"{today_total} task{'s' if today_total != 1 else ''} due today")
+                _ha_notify(
+                    "Household Tasks",
+                    "⚠️ " + " and ".join(parts) + " need attention.",
+                )
+        except Exception as exc:
+            logger.warning("Notification check failed: %s", exc)
+        time.sleep(3600)  # check once per hour
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────
@@ -158,6 +210,11 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     logger.info("Initializing database…")
     db.initialize()
+
+    # Start background notification checker
+    t = threading.Thread(target=_notification_loop, daemon=True)
+    t.start()
+
     port = int(os.environ.get("PORT", 8099))
     logger.info("Household Tasks running on port %d", port)
     app.run(host="0.0.0.0", port=port, debug=False)

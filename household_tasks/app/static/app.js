@@ -199,19 +199,28 @@ async function renderRoomsView(container) {
   container.innerHTML = "";
 
   // Streak banner
-  const streak = await calcStreak();
-  if (streak !== null) {
-    const isZero = streak === 0;
-    const banner = el("div", { className: `streak-banner ${isZero ? "streak-zero" : "streak-active"}` },
-      el("div", { className: "streak-icon" }, isZero ? "🔴" : streak >= 7 ? "🔥" : "⚡"),
+  const streakData = await calcStreak();
+  if (streakData !== null) {
+    const { streak, has_history } = streakData;
+    let icon, countText, subText, cls;
+    if (!has_history) {
+      icon = "🌟"; countText = "All clear!"; subText = "No overdue tasks yet"; cls = "streak-active";
+    } else if (streak === 0) {
+      icon = "🔴"; countText = "Streak broken"; subText = "A task is currently overdue"; cls = "streak-zero";
+    } else {
+      icon = streak >= 7 ? "🔥" : "⚡";
+      countText = String(streak);
+      subText = "Days since last overdue task";
+      cls = "streak-active";
+    }
+    const banner = el("div", { className: `streak-banner ${cls}` },
+      el("div", { className: "streak-icon" }, icon),
       el("div", { className: "streak-body" },
         el("div", { className: "streak-count" },
-          isZero ? "Streak broken" : String(streak),
-          isZero ? null : el("span", {}, `day${streak !== 1 ? "s" : ""}`),
+          countText,
+          has_history && streak > 0 ? el("span", {}, ` day${streak !== 1 ? "s" : ""}`) : null,
         ),
-        el("div", { className: "streak-sub" },
-          isZero ? "A task is currently overdue" : "Since last overdue task",
-        ),
+        el("div", { className: "streak-sub" }, subText),
       ),
     );
     container.append(banner);
@@ -230,13 +239,13 @@ async function renderRoomsView(container) {
 
   for (const room of state.rooms) {
     const statusClass =
-      room.overdue_count  > 0 ? "status-overdue" :
-      room.due_soon_count > 0 ? "status-soon"    : "status-ok";
+      room.overdue_count   > 0 ? "status-overdue" :
+      room.due_today_count > 0 ? "status-soon"    : "status-ok";
 
-    const badge =
-      room.overdue_count  > 0 ? el("span", { className: "badge badge-red"    }, String(room.overdue_count))  :
-      room.due_soon_count > 0 ? el("span", { className: "badge badge-yellow" }, String(room.due_soon_count)) :
-      null;
+    const badgeCount = (room.overdue_count || 0) + (room.due_today_count || 0);
+    const badge = badgeCount > 0
+      ? el("span", { className: `badge ${room.overdue_count > 0 ? "badge-red" : "badge-yellow"}` }, String(badgeCount))
+      : null;
 
     const card = el("div", { className: `room-card ${statusClass}`,
                               onClick: () => navigate("room", { roomId: room.id }) },
@@ -737,7 +746,8 @@ async function showCompleteModal(task) {
         `↻ Next due date will be recalculated (${
           formatRecurrence(task.recurrence_type, JSON.parse(task.recurrence_config || "{}"))
         })`)
-    : null;
+    : el("p", { className: "recur-notice recur-notice-warn" },
+        "⚠️ This task has no recurrence and will be permanently removed once completed.");
 
   const body = el("div", {},
     el("div", { className: "complete-task-name" }, task.title),
@@ -765,6 +775,7 @@ async function showCompleteModal(task) {
             notes:        notesVal || null,
           });
           closeModal();
+          // Non-recurring tasks are deleted on completion — navigate back to room
           await navigate("room", { roomId: state.currentRoomId });
         } catch (err) { alert(err.message); }
       },

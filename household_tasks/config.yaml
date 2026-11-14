@@ -13,4 +13,4 @@ ingress: true
 ingress_port: 8099
 panel_icon: "mdi:clipboard-check-multiple-outline"
 panel_title: "Household Tasks"
-homeassistant_api: false
+homeassistant_api: true

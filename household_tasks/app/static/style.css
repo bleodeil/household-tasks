@@ -645,6 +645,13 @@ input[type="checkbox"] {
   background: var(--primary-bg);
   border-radius: var(--radius-sm);
 }
+.recur-notice-warn {
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  font-style: normal;
+  font-weight: 500;
+}
 
 /* ── Completion log ─────────────────────────────────── */
 .log-list  { display: flex; flex-direction: column; gap: 8px; }
