@@ -1,5 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/base-python:latest
-FROM $BUILD_FROM
+FROM python:3.11-alpine
 
 # Install Python dependencies
 COPY app/requirements.txt /tmp/requirements.txt
