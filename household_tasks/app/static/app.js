@@ -11,10 +11,15 @@ const state = {
   tasks:         [],        // tasks for the current room
 };
 
+// ── Ingress base path ──────────────────────────────────────────────────────────
+// HA Ingress serves the app under a dynamic prefix. We read it from the <meta>
+// tag injected by Flask so all API calls use the correct base URL.
+const BASE = (document.querySelector('meta[name="ingress-path"]')?.content || "").replace(/\/$/, "");
+
 // ── API helpers ────────────────────────────────────────────────────────────────
 const api = {
   async _fetch(url, opts = {}) {
-    const r = await fetch(url, opts);
+    const r = await fetch(BASE + url, opts);
     if (r.status === 204) return null;
     if (!r.ok) {
       const msg = await r.text().catch(() => r.statusText);
