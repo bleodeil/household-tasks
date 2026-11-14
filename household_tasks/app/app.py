@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Household Tasks — Flask backend"""
+
+import os
+import logging
+from flask import Flask, jsonify, request, render_template
+from database import Database
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__, template_folder="templates", static_folder="static")
+
+DB_PATH = "/data/household_tasks.db"
+db = Database(DB_PATH)
+
+
+# ── Main page ──────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+# ── Rooms ──────────────────────────────────────────────────────────────────────
+
+@app.route("/api/rooms", methods=["GET"])
+def get_rooms():
+    return jsonify(db.get_rooms())
+
+
+@app.route("/api/rooms", methods=["POST"])
+def create_room():
+    data = request.get_json()
+    if not data or not data.get("name", "").strip():
+        return jsonify({"error": "name is required"}), 400
+    return jsonify(db.create_room(data["name"].strip())), 201
+
+
+@app.route("/api/rooms/<int:room_id>", methods=["PUT"])
+def update_room(room_id):
+    data = request.get_json()
+    if not data or not data.get("name", "").strip():
+        return jsonify({"error": "name is required"}), 400
+    room = db.update_room(room_id, data["name"].strip())
+    if room is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(room)
+
+
+@app.route("/api/rooms/<int:room_id>", methods=["DELETE"])
+def delete_room(room_id):
+    db.delete_room(room_id)
+    return "", 204
+
+
+# ── Members ────────────────────────────────────────────────────────────────────
+
+@app.route("/api/members", methods=["GET"])
+def get_members():
+    return jsonify(db.get_members())
+
+
+@app.route("/api/members", methods=["POST"])
+def create_member():
+    data = request.get_json()
+    if not data or not data.get("name", "").strip():
+        return jsonify({"error": "name is required"}), 400
+    return jsonify(db.create_member(data["name"].strip(), data.get("color", "#3b82f6"))), 201
+
+
+@app.route("/api/members/<int:member_id>", methods=["PUT"])
+def update_member(member_id):
+    data = request.get_json()
+    if not data or not data.get("name", "").strip():
+        return jsonify({"error": "name is required"}), 400
+    member = db.update_member(member_id, data["name"].strip(), data.get("color", "#3b82f6"))
+    if member is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(member)
+
+
+@app.route("/api/members/<int:member_id>", methods=["DELETE"])
+def delete_member(member_id):
+    db.delete_member(member_id)
+    return "", 204
+
+
+# ── Tasks ──────────────────────────────────────────────────────────────────────
+
+@app.route("/api/tasks", methods=["GET"])
+def get_tasks():
+    room_id = request.args.get("room_id", type=int)
+    return jsonify(db.get_tasks(room_id=room_id))
+
+
+@app.route("/api/tasks", methods=["POST"])
+def create_task():
+    data = request.get_json()
+    if not data or not data.get("title", "").strip() or not data.get("room_id"):
+        return jsonify({"error": "title and room_id are required"}), 400
+    return jsonify(db.create_task(data)), 201
+
+
+@app.route("/api/tasks/<int:task_id>", methods=["GET"])
+def get_task(task_id):
+    task = db.get_task(task_id)
+    if task is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(task)
+
+
+@app.route("/api/tasks/<int:task_id>", methods=["PUT"])
+def update_task(task_id):
+    data = request.get_json()
+    if not data or not data.get("title", "").strip():
+        return jsonify({"error": "title is required"}), 400
+    task = db.update_task(task_id, data)
+    if task is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(task)
+
+
+@app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
+def delete_task(task_id):
+    db.delete_task(task_id)
+    return "", 204
+
+
+@app.route("/api/tasks/<int:task_id>/complete", methods=["POST"])
+def complete_task(task_id):
+    data = request.get_json() or {}
+    result = db.complete_task(task_id, data)
+    if result is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/tasks/<int:task_id>/log", methods=["GET"])
+def get_task_log(task_id):
+    return jsonify(db.get_task_log(task_id))
+
+
+@app.route("/api/streak", methods=["GET"])
+def get_streak():
+    return jsonify({"streak": db.get_streak()})
+
+
+# ── Startup ────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    logger.info("Initializing database…")
+    db.initialize()
+    port = int(os.environ.get("PORT", 8099))
+    logger.info("Household Tasks running on port %d", port)
+    app.run(host="0.0.0.0", port=port, debug=False)
