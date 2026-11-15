@@ -1,6 +1,6 @@
 name: "Household Tasks"
 description: "Family task management with rooms, recurrence, and completion tracking"
-version: "1.0.0"
+version: "1.0.1"
 slug: "household_tasks"
 init: false
 arch:
@@ -14,3 +14,7 @@ ingress_port: 8099
 panel_icon: "mdi:clipboard-check-multiple-outline"
 panel_title: "Household Tasks"
 homeassistant_api: true
+options:
+  notification_hour: 20
+schema:
+  notification_hour: "int(0,23)"

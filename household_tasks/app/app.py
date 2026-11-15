@@ -176,32 +176,52 @@ def _ha_notify(title: str, message: str):
         logger.warning("HA notification failed: %s", exc)
 
 
+# Read notification hour from HA add-on options (set in the Configuration tab)
+# Falls back to 20 (8pm) if the options file isn't present (e.g. local dev).
+def _load_notify_hour():
+    import json as _json
+    try:
+        with open("/data/options.json") as f:
+            return int(_json.load(f).get("notification_hour", 20))
+    except Exception:
+        return 20
+
+NOTIFY_HOUR = _load_notify_hour()
+
 def _notification_loop():
-    """Background thread: check for overdue / due-today tasks every hour
-    and fire a HA notification if any are found."""
-    # Wait a bit after startup before the first check
-    time.sleep(60)
+    """Background thread: fire one HA notification per day at NOTIFY_HOUR
+    if there are overdue or due-today tasks."""
+    from datetime import date, datetime
+    last_notified = None
+
     while True:
         try:
-            from datetime import date
-            today = date.today().isoformat()
-            rooms = db.get_rooms()
-            overdue_total  = sum(r.get("overdue_count",  0) for r in rooms)
-            today_total    = sum(r.get("due_today_count", 0) for r in rooms)
+            now = datetime.now()
+            today = date.today()
 
-            if overdue_total > 0 or today_total > 0:
-                parts = []
-                if overdue_total:
-                    parts.append(f"{overdue_total} overdue task{'s' if overdue_total != 1 else ''}")
-                if today_total:
-                    parts.append(f"{today_total} task{'s' if today_total != 1 else ''} due today")
-                _ha_notify(
-                    "Household Tasks",
-                    "⚠️ " + " and ".join(parts) + " need attention.",
-                )
+            # Only notify once per day, at or after NOTIFY_HOUR
+            if now.hour >= NOTIFY_HOUR and last_notified != today:
+                rooms = db.get_rooms()
+                overdue_total = sum(r.get("overdue_count",  0) for r in rooms)
+                today_total   = sum(r.get("due_today_count", 0) for r in rooms)
+
+                if overdue_total > 0 or today_total > 0:
+                    parts = []
+                    if overdue_total:
+                        parts.append(f"{overdue_total} overdue task{'s' if overdue_total != 1 else ''}")
+                    if today_total:
+                        parts.append(f"{today_total} task{'s' if today_total != 1 else ''} due today")
+                    _ha_notify(
+                        "Household Tasks",
+                        "⚠️ " + " and ".join(parts) + " need attention.",
+                    )
+                last_notified = today
+
         except Exception as exc:
             logger.warning("Notification check failed: %s", exc)
-        time.sleep(3600)  # check once per hour
+
+        # Sleep until next check — wake up every 30 min to stay close to 8am
+        time.sleep(1800)
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────

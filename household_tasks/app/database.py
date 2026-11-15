@@ -302,9 +302,14 @@ class Database:
 
         if task["is_recurring"] and task["recurrence_type"]:
             # Recurring: recalculate next due date
-            cfg  = json.loads(task["recurrence_config"]) if task["recurrence_config"] else {}
+            cfg       = json.loads(task["recurrence_config"]) if task["recurrence_config"] else {}
             from_date = datetime.fromisoformat(completed_at).date()
             next_due  = _calculate_next_due(task["recurrence_type"], cfg, from_date)
+
+            # "Skip next occurrence" — advance one extra cycle
+            if data.get("skip_next") and next_due:
+                next_due = _calculate_next_due(task["recurrence_type"], cfg, next_due)
+
             c.execute(
                 "UPDATE tasks SET due_date = ? WHERE id = ?",
                 (next_due.isoformat() if next_due else None, task_id),

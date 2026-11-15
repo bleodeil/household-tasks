@@ -741,11 +741,26 @@ async function showCompleteModal(task) {
     ...state.members.map(m => el("option", { value: String(m.id) }, m.name)),
   );
 
+  const SKIP_ELIGIBLE = ["weekly_days", "monthly_dom", "monthly_nth_dow"];
+  const today = todayStr();
+  const isEarly = task.due_date && task.due_date.split("T")[0] > today;
+  const canSkip = task.is_recurring && SKIP_ELIGIBLE.includes(task.recurrence_type) && isEarly;
+
+  const skipToggle = canSkip
+    ? el("label", { className: "skip-next-label" },
+        el("input", { type: "checkbox", id: "skip-next", checked: true }),
+        " Skip next occurrence",
+      )
+    : null;
+
   const recurNote = task.is_recurring && task.recurrence_type
-    ? el("p", { className: "recur-notice" },
-        `↻ Next due date will be recalculated (${
-          formatRecurrence(task.recurrence_type, JSON.parse(task.recurrence_config || "{}"))
-        })`)
+    ? el("div", {},
+        el("p", { className: "recur-notice" },
+          `↻ Next due date will be recalculated (${
+            formatRecurrence(task.recurrence_type, JSON.parse(task.recurrence_config || "{}"))
+          })`),
+        skipToggle,
+      )
     : el("p", { className: "recur-notice recur-notice-warn" },
         "⚠️ This task has no recurrence and will be permanently removed once completed.");
 
@@ -769,10 +784,12 @@ async function showCompleteModal(task) {
         const memberVal = document.getElementById("complete-member").value;
         const notesVal  = document.getElementById("complete-notes").value.trim();
         try {
+          const skipNext = document.getElementById("skip-next")?.checked || false;
           await api.post(`/api/tasks/${task.id}/complete`, {
             completed_at: timeVal ? new Date(timeVal).toISOString() : null,
             member_id:    memberVal ? parseInt(memberVal, 10) : null,
             notes:        notesVal || null,
+            skip_next:    skipNext,
           });
           closeModal();
           // Non-recurring tasks are deleted on completion — navigate back to room
